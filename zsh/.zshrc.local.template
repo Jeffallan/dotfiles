@@ -1,0 +1,85 @@
+# Local/Machine-specific ZSH configuration
+# This file is NOT tracked in git - customize for your machine
+
+#============================================================================
+# NVM (Node Version Manager)
+# REQUIRED: For nvm autoload functionality in .zshrc
+# Uncomment the appropriate lines for your system
+#============================================================================
+# export NVM_DIR="$HOME/.nvm"
+# Homebrew installation (macOS)
+# [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"
+# [ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && \. "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
+# Or standard installation
+# [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+# [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+
+#============================================================================
+# Optional: Python aliases
+#============================================================================
+# alias python='python3'
+# alias pip='pip3'
+
+#============================================================================
+# Optional: pipx PATH
+#============================================================================
+# export PATH="$PATH:$HOME/.local/bin"
+# export PATH="$HOME/.local/bin:$PATH"
+
+#============================================================================
+# Optional: Bitwarden SSH Agent
+# Uncomment if using Bitwarden for SSH key management
+#============================================================================
+# macOS
+# export SSH_AUTH_SOCK=~/Library/Containers/com.bitwarden.desktop/Data/.bitwarden-ssh-agent.sock
+# Linux (Snap)
+# export SSH_AUTH_SOCK=~/.bitwarden-ssh-agent.sock
+
+#============================================================================
+# Optional: Android Studio
+# Uncomment and adjust paths if using Android development
+#============================================================================
+# export ANDROID_HOME=$HOME/Library/Android/sdk
+# export PATH=$PATH:$ANDROID_HOME/platform-tools
+# export PATH=$PATH:$ANDROID_HOME/emulator
+
+#============================================================================
+# Optional: Java
+# Uncomment and adjust version/path as needed
+#============================================================================
+# export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+# export PATH="$JAVA_HOME/bin:$PATH"
+
+#============================================================================
+# Optional: Flutter
+# Uncomment and adjust path as needed
+#============================================================================
+# export PATH="$PATH:$HOME/flutter/bin"
+
+#============================================================================
+# Optional: Bun
+# Uncomment if using Bun runtime
+#============================================================================
+# export BUN_INSTALL="$HOME/.bun"
+# export PATH="$BUN_INSTALL/bin:$PATH"
+# [ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
+
+#============================================================================
+# Optional: iTerm2 Shell Integration (macOS)
+#============================================================================
+# test -e "${HOME}/.iterm2_shell_integration.zsh" && source "${HOME}/.iterm2_shell_integration.zsh"
+
+#============================================================================
+# Optional: Langflow
+#============================================================================
+# [ -f "$HOME/.langflow/uv/env" ] && . "$HOME/.langflow/uv/env"
+
+#============================================================================
+# Optional: Rust/Cargo
+#============================================================================
+# [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
+#============================================================================
+# Custom aliases and machine-specific configurations
+# Add your personal aliases, SSH shortcuts, etc. below
+#============================================================================
