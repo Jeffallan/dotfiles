@@ -128,6 +128,69 @@ else
     fi
 fi
 
+# Handle Syncthing .stignore
+echo ""
+echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║     Syncthing .stignore Configuration         ║${NC}"
+echo -e "${BLUE}╚═══════════════════════════════════════════════╝${NC}"
+echo ""
+
+# Ask for sync folder location
+read -p "$(echo -e ${BLUE}Enter your Syncthing work folder path [default: ~/work]:${NC} )" SYNC_FOLDER
+SYNC_FOLDER=${SYNC_FOLDER:-$HOME/work}
+
+# Expand tilde
+SYNC_FOLDER="${SYNC_FOLDER/#\~/$HOME}"
+
+if [ -d "$SYNC_FOLDER" ]; then
+    if [ -L "$SYNC_FOLDER/.stignore" ]; then
+        LINK_TARGET=$(readlink "$SYNC_FOLDER/.stignore")
+        if [ "$LINK_TARGET" = "$DOTFILES_DIR/syncthing/.stignore" ]; then
+            echo -e "${GREEN}✓ .stignore already linked correctly${NC}"
+            echo -e "  Location: $SYNC_FOLDER/.stignore → $DOTFILES_DIR/syncthing/.stignore"
+        else
+            echo -e "${YELLOW}⚠ .stignore exists but points to: $LINK_TARGET${NC}"
+            read -p "$(echo -e ${BLUE}Update symlink? [Y/n]:${NC} )" -n 1 -r
+            echo ""
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                rm "$SYNC_FOLDER/.stignore"
+                ln -s "$DOTFILES_DIR/syncthing/.stignore" "$SYNC_FOLDER/.stignore"
+                echo -e "${GREEN}  ✓ Updated symlink${NC}"
+            fi
+        fi
+    elif [ -f "$SYNC_FOLDER/.stignore" ]; then
+        echo -e "${YELLOW}⚠ .stignore file exists (not a symlink)${NC}"
+        read -p "$(echo -e ${BLUE}Replace with symlink? [y/N]:${NC} )" -n 1 -r
+        echo ""
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            if [ -d "$BACKUP_DIR" ]; then
+                cp "$SYNC_FOLDER/.stignore" "$BACKUP_DIR/.stignore"
+                echo -e "${GREEN}  ✓ Backed up existing .stignore${NC}"
+            fi
+            rm "$SYNC_FOLDER/.stignore"
+            ln -s "$DOTFILES_DIR/syncthing/.stignore" "$SYNC_FOLDER/.stignore"
+            echo -e "${GREEN}  ✓ Created symlink${NC}"
+        else
+            echo -e "${YELLOW}  ⊘ Skipped${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠ .stignore does not exist${NC}"
+        read -p "$(echo -e ${BLUE}Create symlink? [Y/n]:${NC} )" -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            ln -s "$DOTFILES_DIR/syncthing/.stignore" "$SYNC_FOLDER/.stignore"
+            echo -e "${GREEN}  ✓ Created symlink${NC}"
+            echo -e "${YELLOW}  ⚠ Restart Syncthing or rescan folder for changes to take effect${NC}"
+        else
+            echo -e "${YELLOW}  ⊘ Skipped${NC}"
+        fi
+    fi
+else
+    echo -e "${YELLOW}⚠ Sync folder not found: $SYNC_FOLDER${NC}"
+    echo -e "  Create the folder and run this script again, or manually create symlink:"
+    echo -e "  ln -s $DOTFILES_DIR/syncthing/.stignore $SYNC_FOLDER/.stignore"
+fi
+
 # Summary
 echo ""
 echo -e "${BLUE}╔═══════════════════════════════════════════════╗${NC}"
@@ -143,4 +206,5 @@ echo ""
 echo -e "${YELLOW}Next steps:${NC}"
 echo -e "  1. Edit ~/.zshrc.local and uncomment required configurations"
 echo -e "  2. Restart your shell or run: source ~/.zshrc"
+echo -e "  3. If Syncthing is running, rescan folder or restart to apply .stignore"
 echo ""
