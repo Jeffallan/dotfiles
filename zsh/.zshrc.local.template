@@ -33,7 +33,7 @@
 # macOS
 # export SSH_AUTH_SOCK=~/Library/Containers/com.bitwarden.desktop/Data/.bitwarden-ssh-agent.sock
 # Linux (Snap)
-# export SSH_AUTH_SOCK=~/.bitwarden-ssh-agent.sock
+# export SSH_AUTH_SOCK=$HOME/snap/bitwarden/current/.bitwarden-ssh-agent.sock
 
 #============================================================================
 # Optional: Android Studio

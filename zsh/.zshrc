@@ -71,7 +71,7 @@ ZSH_THEME="parrot"
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
 
-plugins=(git zsh-autosuggestions)
+plugins=(git zsh-autosuggestions history)
 
 source $ZSH/oh-my-zsh.sh
 
