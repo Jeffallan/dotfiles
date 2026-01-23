@@ -85,6 +85,30 @@ ln -s ~/dotfiles/claude/CLAUDE.md ~/.claude/CLAUDE.md
 
 Behavioral patterns adapted from [obra/superpowers](https://github.com/obra/superpowers) by Jesse Vincent (@obra), MIT License.
 
+## Syncthing Configuration
+
+Multi-language development ignore patterns optimized for performance.
+
+### Features
+
+- Excludes build artifacts and dependencies (node_modules, venv, target, vendor)
+- Excludes live database files (use SQL dumps instead)
+- **Includes** dev secrets and docker-compose overrides for convenience
+- Supports Node.js, Python, Go, Rust, React Native, and more
+- Dramatically reduces file count (300K+ → 5K-10K files)
+- Reduces sync time from hours to minutes
+
+### Installation
+
+```bash
+# Copy to your synced folder
+cp ~/dotfiles/syncthing/.stignore ~/path/to/synced/folder/.stignore
+
+# Restart Syncthing or rescan folder
+```
+
+See [syncthing/README.md](syncthing/README.md) for detailed documentation.
+
 ## License
 
 MIT License - See LICENSE file
