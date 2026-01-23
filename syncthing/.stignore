@@ -193,8 +193,10 @@ logs/
 
 #==============================================================================
 # Git
+# WARNING: Syncing .git folders can cause corruption if multiple machines
+# perform git operations simultaneously. Use git push/pull instead.
 #==============================================================================
-.git/
+# .git/
 
 #==============================================================================
 # Lock files (optional - uncomment to exclude)
