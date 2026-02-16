@@ -85,6 +85,20 @@ ln -s ~/dotfiles/syncthing/.stignore ~/path/to/your/synced/folder/.stignore
 - Minimal background activity
 - Low resource usage
 
+### Cleaning Up Ignored Artifacts
+
+When Syncthing reports errors like "directory has been deleted on a remote device but contains ignored files", use the cleanup script to remove locally-ignored build artifacts that are blocking directory deletions.
+
+```bash
+# Clean ~/work (default)
+./clean-ignored-artifacts.sh
+
+# Clean a different synced folder
+./clean-ignored-artifacts.sh ~/note-sync
+```
+
+The script reads patterns from the folder's `.stignore`, finds matching files and directories, shows them with sizes, and asks for confirmation before deleting. It can be run from any directory.
+
 ### Customization
 
 Edit the file to match your workflow:
