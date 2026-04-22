@@ -204,9 +204,9 @@ UNTIL_DATE="${UNTIL%%T*}"
 
 # ---- fetch events, determine touched repos + per-type counts ----
 #
-# Output lines: "<repo>\t<event_type>"
+# Output lines: "<repo>\t<event_type>\t<payload.action or empty>"
 EVENTS=$(gh api "/users/${USER_ARG}/events" --paginate --jq \
-    ".[] | select(.created_at >= \"${SINCE}\" and .created_at <= \"${UNTIL}\") | \"\(.repo.name)\t\(.type)\"" \
+    ".[] | select(.created_at >= \"${SINCE}\" and .created_at <= \"${UNTIL}\") | \"\(.repo.name)\t\(.type)\t\(.payload.action // \"\")\"" \
     2>/dev/null || true)
 
 # Collect unique repos (preserve order of first appearance).
@@ -240,6 +240,12 @@ count_events_for() {
     printf '%s\n' "$EVENTS" | awk -F'\t' -v r="$repo" -v t="$typ" '$1==r && $2==t' | wc -l | tr -d ' '
 }
 
+# count_events_for_action <repo> <type> <action>
+count_events_for_action() {
+    local repo="$1" typ="$2" action="$3"
+    printf '%s\n' "$EVENTS" | awk -F'\t' -v r="$repo" -v t="$typ" -v a="$action" '$1==r && $2==t && $3==a' | wc -l | tr -d ' '
+}
+
 for repo in "${REPOS[@]}"; do
     # Authored commits in window (counts all commits where user is GitHub author).
     commits=$(gh api "repos/${repo}/commits?author=${USER_ARG}&since=${SINCE}&until=${UNTIL}" \
@@ -252,6 +258,9 @@ for repo in "${REPOS[@]}"; do
 
     # Releases cut by the user in the repo+window (from events feed).
     releases=$(count_events_for "$repo" ReleaseEvent)
+
+    # Issues opened by the user in the repo+window (from events feed).
+    issues=$(count_events_for_action "$repo" IssuesEvent opened)
 
     # Assemble the summary line (join parts with " · ").
     summary=""
@@ -268,9 +277,16 @@ for repo in "${REPOS[@]}"; do
             append_part "${releases} releases"
         fi
     fi
+    if [[ "$issues" -gt 0 ]]; then
+        if [[ "$issues" -eq 1 ]]; then
+            append_part "${issues} issue opened"
+        else
+            append_part "${issues} issues opened"
+        fi
+    fi
 
-    if [[ "$commits" -eq 0 && "$prs_merged" -eq 0 && "$releases" -eq 0 ]]; then
-        printf '  %-42s (events only — no authored commits/PRs/releases)\n' "$repo"
+    if [[ "$commits" -eq 0 && "$prs_merged" -eq 0 && "$releases" -eq 0 && "$issues" -eq 0 ]]; then
+        printf '  %-42s (events only — no authored commits/PRs/releases/issues)\n' "$repo"
     else
         printf '  %-42s %s\n' "$repo" "$summary"
     fi
