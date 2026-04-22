@@ -1,0 +1,290 @@
+#!/usr/bin/env bash
+#
+# my-week — summarize your GitHub activity for a time window.
+#
+# Usage: my-week [--period SPEC] [--since DATE] [--until DATE]
+#                [--user USERNAME] [--verbose]
+#
+#   --period SPEC   Named preset or rolling window:
+#                     this-week   (default)  last-week
+#                     this-month             last-month
+#                     today
+#                     Nd / Nw / Nm  (e.g. 7d, 2w, 1m)
+#   --since DATE    ISO date (YYYY-MM-DD). Overrides --period start.
+#   --until DATE    ISO date (YYYY-MM-DD). Overrides --period end.
+#   --user USER     GitHub login. Default: `gh api user --jq .login`.
+#   --verbose       Include up to 5 commit subjects per repo.
+#   -h, --help      Show this message.
+#
+# Exits: 0 ok, 1 misuse, 2 gh missing, 3 gh not authenticated.
+
+set -euo pipefail
+
+PROG="${0##*/}"
+IS_DARWIN=0
+[[ "$(uname -s)" == "Darwin" ]] && IS_DARWIN=1
+
+usage() {
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+die() {
+    printf '%s: %s\n' "$PROG" "$1" >&2
+    exit "${2:-1}"
+}
+
+# Format a UTC ISO-8601 timestamp from a date arithmetic spec.
+# Accepts one of:
+#   now                       — current time
+#   today                     — today 00:00:00Z
+#   monday-of-week            — Monday 00:00:00Z of current ISO week
+#   monday-of-last-week       — Monday 00:00:00Z of prior ISO week
+#   sunday-of-last-week-end   — Sunday 23:59:59Z of prior ISO week
+#   first-of-month            — 1st of current month 00:00:00Z
+#   first-of-last-month       — 1st of prior month 00:00:00Z
+#   last-of-last-month-end    — last day of prior month 23:59:59Z
+#   offset:Nd | offset:Nw | offset:Nm   — now minus N days/weeks/months
+#   date-start:YYYY-MM-DD     — 00:00:00Z at given date
+#   date-end:YYYY-MM-DD       — 23:59:59Z at given date
+_iso() {
+    local spec="$1"
+    case "$spec" in
+        now)
+            if [[ $IS_DARWIN -eq 1 ]]; then
+                date -u +%Y-%m-%dT%H:%M:%SZ
+            else
+                date -u +%Y-%m-%dT%H:%M:%SZ
+            fi
+            ;;
+        today)
+            date -u +%Y-%m-%dT00:00:00Z
+            ;;
+        monday-of-week)
+            # ISO weekday: 1=Mon..7=Sun
+            local dow offset
+            dow=$(date -u +%u)
+            offset=$((dow - 1))
+            if [[ $IS_DARWIN -eq 1 ]]; then
+                date -u -v-"${offset}"d +%Y-%m-%dT00:00:00Z
+            else
+                date -u -d "${offset} days ago" +%Y-%m-%dT00:00:00Z
+            fi
+            ;;
+        monday-of-last-week)
+            local dow offset
+            dow=$(date -u +%u)
+            offset=$((dow - 1 + 7))
+            if [[ $IS_DARWIN -eq 1 ]]; then
+                date -u -v-"${offset}"d +%Y-%m-%dT00:00:00Z
+            else
+                date -u -d "${offset} days ago" +%Y-%m-%dT00:00:00Z
+            fi
+            ;;
+        sunday-of-last-week-end)
+            local dow offset
+            dow=$(date -u +%u)
+            offset=$((dow - 1 + 1))
+            if [[ $IS_DARWIN -eq 1 ]]; then
+                date -u -v-"${offset}"d +%Y-%m-%dT23:59:59Z
+            else
+                date -u -d "${offset} days ago" +%Y-%m-%dT23:59:59Z
+            fi
+            ;;
+        first-of-month)
+            date -u +%Y-%m-01T00:00:00Z
+            ;;
+        first-of-last-month)
+            if [[ $IS_DARWIN -eq 1 ]]; then
+                date -u -v1d -v-1m +%Y-%m-01T00:00:00Z
+            else
+                date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m-01T00:00:00Z
+            fi
+            ;;
+        last-of-last-month-end)
+            if [[ $IS_DARWIN -eq 1 ]]; then
+                date -u -v1d -v-1d +%Y-%m-%dT23:59:59Z
+            else
+                date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m-%dT23:59:59Z
+            fi
+            ;;
+        offset:*)
+            local rhs unit n flag
+            rhs="${spec#offset:}"
+            unit="${rhs: -1}"
+            n="${rhs%?}"
+            [[ "$n" =~ ^[0-9]+$ ]] || die "invalid offset: $rhs" 1
+            case "$unit" in
+                d) flag="d"; word="days" ;;
+                w) flag="w"; word="weeks" ;;
+                m) flag="m"; word="months" ;;
+                *) die "invalid offset unit '$unit' in '$rhs' (use d/w/m)" 1 ;;
+            esac
+            if [[ $IS_DARWIN -eq 1 ]]; then
+                date -u -v-"${n}${flag}" +%Y-%m-%dT%H:%M:%SZ
+            else
+                date -u -d "${n} ${word} ago" +%Y-%m-%dT%H:%M:%SZ
+            fi
+            ;;
+        date-start:*)
+            local d="${spec#date-start:}"
+            [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "invalid date: $d (want YYYY-MM-DD)" 1
+            printf '%sT00:00:00Z\n' "$d"
+            ;;
+        date-end:*)
+            local d="${spec#date-end:}"
+            [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "invalid date: $d (want YYYY-MM-DD)" 1
+            printf '%sT23:59:59Z\n' "$d"
+            ;;
+        *)
+            die "internal: unknown _iso spec '$spec'" 1
+            ;;
+    esac
+}
+
+resolve_period() {
+    local period="$1"
+    case "$period" in
+        this-week)
+            SINCE=$(_iso monday-of-week); UNTIL=$(_iso now) ;;
+        last-week)
+            SINCE=$(_iso monday-of-last-week); UNTIL=$(_iso sunday-of-last-week-end) ;;
+        this-month)
+            SINCE=$(_iso first-of-month); UNTIL=$(_iso now) ;;
+        last-month)
+            SINCE=$(_iso first-of-last-month); UNTIL=$(_iso last-of-last-month-end) ;;
+        today)
+            SINCE=$(_iso today); UNTIL=$(_iso now) ;;
+        *[dwm])
+            SINCE=$(_iso "offset:$period"); UNTIL=$(_iso now) ;;
+        *)
+            die "unknown --period '$period'" 1 ;;
+    esac
+}
+
+# ---- argument parsing ----
+PERIOD="this-week"
+SINCE_OVERRIDE=""
+UNTIL_OVERRIDE=""
+USER_ARG=""
+VERBOSE=0
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --period) [[ $# -ge 2 ]] || die "--period needs a value" 1; PERIOD="$2"; shift 2 ;;
+        --since)  [[ $# -ge 2 ]] || die "--since needs a value" 1;  SINCE_OVERRIDE="$2"; shift 2 ;;
+        --until)  [[ $# -ge 2 ]] || die "--until needs a value" 1;  UNTIL_OVERRIDE="$2"; shift 2 ;;
+        --user)   [[ $# -ge 2 ]] || die "--user needs a value" 1;   USER_ARG="$2"; shift 2 ;;
+        --verbose) VERBOSE=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) die "unknown argument: $1 (try --help)" 1 ;;
+    esac
+done
+
+# ---- preflight ----
+command -v gh >/dev/null 2>&1 || die "gh CLI not found (https://cli.github.com)" 2
+gh auth status >/dev/null 2>&1 || die "gh not authenticated (run: gh auth login)" 3
+
+if [[ -z "$USER_ARG" ]]; then
+    USER_ARG=$(gh api user --jq '.login')
+fi
+
+resolve_period "$PERIOD"
+LABEL="$PERIOD"
+if [[ -n "$SINCE_OVERRIDE" ]]; then
+    SINCE=$(_iso "date-start:$SINCE_OVERRIDE")
+    LABEL="custom range"
+fi
+if [[ -n "$UNTIL_OVERRIDE" ]]; then
+    UNTIL=$(_iso "date-end:$UNTIL_OVERRIDE")
+    LABEL="custom range"
+fi
+
+SINCE_DATE="${SINCE%%T*}"
+UNTIL_DATE="${UNTIL%%T*}"
+
+# ---- fetch events, determine touched repos + per-type counts ----
+#
+# Output lines: "<repo>\t<event_type>"
+EVENTS=$(gh api "/users/${USER_ARG}/events" --paginate --jq \
+    ".[] | select(.created_at >= \"${SINCE}\" and .created_at <= \"${UNTIL}\") | \"\(.repo.name)\t\(.type)\"" \
+    2>/dev/null || true)
+
+# Collect unique repos (preserve order of first appearance).
+REPOS=()
+if [[ -n "$EVENTS" ]]; then
+    while IFS=$'\t' read -r repo _type; do
+        [[ -z "$repo" ]] && continue
+        seen=0
+        if [[ ${#REPOS[@]} -gt 0 ]]; then
+            for r in "${REPOS[@]}"; do
+                [[ "$r" == "$repo" ]] && seen=1 && break
+            done
+        fi
+        [[ $seen -eq 0 ]] && REPOS+=("$repo")
+    done <<< "$EVENTS"
+fi
+
+# ---- header ----
+printf 'Your %s (%s → %s) as %s\n\n' "$LABEL" "$SINCE_DATE" "$UNTIL_DATE" "$USER_ARG"
+
+if [[ ${#REPOS[@]} -eq 0 ]]; then
+    echo "No public activity in this window."
+    exit 0
+fi
+
+TOTAL_COMMITS=0
+
+# count_events_for <repo> <type>
+count_events_for() {
+    local repo="$1" typ="$2"
+    printf '%s\n' "$EVENTS" | awk -F'\t' -v r="$repo" -v t="$typ" '$1==r && $2==t' | wc -l | tr -d ' '
+}
+
+for repo in "${REPOS[@]}"; do
+    # Authored commits in window (counts all commits where user is GitHub author).
+    commits=$(gh api "repos/${repo}/commits?author=${USER_ARG}&since=${SINCE}&until=${UNTIL}" \
+        --paginate --jq 'length' 2>/dev/null | awk '{s+=$1} END {print s+0}')
+
+    # Merged PRs the user authored in the repo+window.
+    prs_merged=$(gh search prs --author="$USER_ARG" --repo="$repo" \
+        --created="${SINCE_DATE}..${UNTIL_DATE}" --merged \
+        --json number --jq 'length' 2>/dev/null || echo 0)
+
+    # Releases cut by the user in the repo+window (from events feed).
+    releases=$(count_events_for "$repo" ReleaseEvent)
+
+    # Assemble the summary line (join parts with " · ").
+    summary=""
+    append_part() {
+        [[ -n "$summary" ]] && summary+=" · "
+        summary+="$1"
+    }
+    append_part "${commits} commits"
+    [[ "$prs_merged" -gt 0 ]] && append_part "${prs_merged} PRs merged"
+    if [[ "$releases" -gt 0 ]]; then
+        if [[ "$releases" -eq 1 ]]; then
+            append_part "${releases} release"
+        else
+            append_part "${releases} releases"
+        fi
+    fi
+
+    if [[ "$commits" -eq 0 && "$prs_merged" -eq 0 && "$releases" -eq 0 ]]; then
+        printf '  %-42s (events only — no authored commits/PRs/releases)\n' "$repo"
+    else
+        printf '  %-42s %s\n' "$repo" "$summary"
+    fi
+
+    TOTAL_COMMITS=$((TOTAL_COMMITS + commits))
+
+    if [[ $VERBOSE -eq 1 && "$commits" -gt 0 ]]; then
+        gh api "repos/${repo}/commits?author=${USER_ARG}&since=${SINCE}&until=${UNTIL}" \
+            --jq '.[] | "      - " + (.commit.message | split("\n")[0])' 2>/dev/null | head -n 5
+    fi
+done
+
+if [[ ${#REPOS[@]} -eq 1 ]]; then
+    printf '\nTotal: %d commits across 1 repo.\n' "$TOTAL_COMMITS"
+else
+    printf '\nTotal: %d commits across %d repos.\n' "$TOTAL_COMMITS" "${#REPOS[@]}"
+fi
