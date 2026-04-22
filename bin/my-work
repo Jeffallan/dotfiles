@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# my-week — summarize your GitHub activity for a time window.
+# my-work — summarize your GitHub activity for a time window.
 #
-# Usage: my-week [--period SPEC] [--since DATE] [--until DATE]
+# Usage: my-work [--period SPEC] [--since DATE] [--until DATE]
 #                [--user USERNAME] [--verbose]
 #
 #   --period SPEC   Named preset or rolling window:
