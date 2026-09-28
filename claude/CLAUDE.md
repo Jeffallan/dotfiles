@@ -23,6 +23,22 @@ When these rationalizing thoughts occur, stop and identify which skill or skills
 
 ---
 
+## Subagent Briefs
+
+**THE 1% RULE DOES NOT SURVIVE DELEGATION UNLESS THE BRIEF CARRIES IT.**
+
+Subagents can see the skill list and this file. They follow the brief instead. When writing any Agent prompt, check the skill list first. If a skill fits the delegated task, phrase the task as "Use the <exact skill name> skill to <task>."
+
+**Instead of:** "Fix the countdown timer freeze in PracticeScreen.tsx."
+**Write:** "Use the fullstack-dev-skills:react-native-expert skill to fix the countdown timer freeze in PracticeScreen.tsx."
+
+- Use the exact name from the skill list so the agent can load it without searching
+- Name a second skill only when the task clearly spans two (for example a fix plus its tests)
+- If no skill fits, write the brief normally. Do not force one.
+- Ask the agent to end its report with the skills it loaded
+
+---
+
 ## Verification Discipline
 
 **NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE.**
