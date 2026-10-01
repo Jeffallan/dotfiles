@@ -27,14 +27,18 @@ When these rationalizing thoughts occur, stop and identify which skill or skills
 
 **THE 1% RULE DOES NOT SURVIVE DELEGATION UNLESS THE BRIEF CARRIES IT.**
 
-Subagents can see the skill list and this file. They follow the brief instead. When writing any Agent prompt, check the skill list first. If a skill fits the delegated task, phrase the task as "Use the <exact skill name> skill to <task>."
+Subagents can see the skill list and this file. They follow the brief instead. When writing any Agent prompt, including Explore and Plan agents, check the skill list first. If a skill fits the delegated task, phrase the task as "Use the <exact skill name> skill to <task>."
 
 **Instead of:** "Fix the countdown timer freeze in PracticeScreen.tsx."
 **Write:** "Use the fullstack-dev-skills:react-native-expert skill to fix the countdown timer freeze in PracticeScreen.tsx."
 
+**Instead of (Plan agent):** "Design a TDD plan for the talus CLI."
+**Write:** "Use the fullstack-dev-skills:test-master skill to design a TDD plan for the talus CLI."
+
 - Use the exact name from the skill list so the agent can load it without searching
 - Name a second skill only when the task clearly spans two (for example a fix plus its tests)
-- If no skill fits, write the brief normally. Do not force one.
+- Match on the skill's workflow, not on a keyword in its description. If no skill's workflow fits, write the brief normally. Do not force one.
+  - Example: checking NIST 800-53, SOC 2 or HIPAA citations against published sources is source research. security-reviewer mentions compliance, but its workflow is code and infrastructure scanning, so that brief gets no skill line.
 - Ask the agent to end its report with the skills it loaded
 
 ---
