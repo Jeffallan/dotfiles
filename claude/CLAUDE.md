@@ -193,3 +193,9 @@ If there's no icon library, offer the user 3 choices:
 1) The user will point you to the location of the desired icon with current project dependencies
 2) The user will tell you which component library to install. You may make followup suggestions given the users preference and choice of icon
 3) The user will accept the usage of an emoji icon.
+
+---
+
+## Private Rules
+
+@~/.claude/CLAUDE.private.md
