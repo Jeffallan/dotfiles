@@ -134,3 +134,18 @@ if [ -n "$NVM_DIR" ] && command -v nvm &> /dev/null; then
   add-zsh-hook chpwd load-nvmrc
   load-nvmrc
 fi
+
+# sesh: pick a tmux session (or zoxide folder) and attach
+# usage: ts          local picker
+#        ts <host>   same picker on <host> over ssh
+ts() {
+  if [[ -n $1 ]]; then
+    ssh -t "$1" 's=$(sesh list | fzf) && sesh connect "$s"'
+    return
+  fi
+  local s
+  s=$(sesh list | fzf) && sesh connect "$s"
+}
+
+# zoxide: record visited folders; cd jumps by frecency (keep near end of file)
+eval "$(zoxide init zsh --cmd cd)"
