@@ -138,9 +138,14 @@ fi
 # sesh: pick a tmux session (or zoxide folder) and attach
 # usage: ts          local picker
 #        ts <host>   same picker on <host> over ssh
+#                    (from iTerm2, attaches with tmux -CC for native windows)
 ts() {
   if [[ -n $1 ]]; then
-    ssh -t "$1" 's=$(sesh list | fzf) && sesh connect "$s"'
+    local attach='sesh connect "$s"'
+    # sesh can't attach with -CC: create the session with -s, then attach by name
+    [[ $TERM_PROGRAM == iTerm.app ]] &&
+      attach='sesh connect -s "$s" && n=${s##*/} && tmux -CC attach -t "=${n//./_}"'
+    ssh -t "$1" "s=\$(sesh list | fzf) && $attach"
     return
   fi
   local s
