@@ -85,6 +85,25 @@ ln -s ~/dotfiles/claude/CLAUDE.md ~/.claude/CLAUDE.md
 
 Behavioral patterns adapted from [obra/superpowers](https://github.com/obra/superpowers) by Jesse Vincent (@obra), MIT License.
 
+## WezTerm Configuration
+
+WezTerm config for an Omarchy (Hyprland) desktop with Mac-style key bindings, where Cmd is Super.
+
+### Features
+
+- Cmd+C / Cmd+V use the clipboard (Omarchy sends Ctrl+Insert / Shift+Insert to terminals)
+- iTerm2-style panes: Cmd+D splits side by side; Cmd+W closes the current pane
+- Cmd+I renames the current tab
+
+Cmd+Shift+D (split down), Cmd+Option+arrows (move between panes) and Cmd+W come from Hyprland bindings in `~/.config/hypr/bindings.lua`, which are not in this repo. They send WezTerm's own split, pane and Ctrl+Shift+W keys.
+
+### Installation
+
+```bash
+mkdir -p ~/.config/wezterm
+ln -s ~/dotfiles/wezterm/wezterm.lua ~/.config/wezterm/wezterm.lua
+```
+
 ## Syncthing Configuration
 
 Multi-language development ignore patterns optimized for performance.

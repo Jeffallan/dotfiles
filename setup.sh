@@ -95,6 +95,7 @@ FILES=(
     "$DOTFILES_DIR/zsh/.zshrc|$HOME/.zshrc"
     "$DOTFILES_DIR/zsh/themes/parrot.zsh-theme|$HOME/.oh-my-zsh/custom/themes/parrot.zsh-theme"
     "$DOTFILES_DIR/claude/CLAUDE.md|$HOME/.claude/CLAUDE.md"
+    "$DOTFILES_DIR/wezterm/wezterm.lua|$HOME/.config/wezterm/wezterm.lua"
 )
 
 # Process each file
