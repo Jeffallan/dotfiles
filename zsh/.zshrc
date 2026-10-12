@@ -142,9 +142,11 @@ fi
 ts() {
   if [[ -n $1 ]]; then
     local attach='sesh connect "$s"'
-    # sesh can't attach with -CC: create the session with -s, then attach by name
+    # sesh can't attach with -CC: create the session with -s, then attach by name.
+    # iTerm2 refuses -CC while the global aggressive-resize is on, or without
+    # UTF-8 (-u: the remote command shell has no LANG).
     [[ $TERM_PROGRAM == iTerm.app ]] &&
-      attach='sesh connect -s "$s" && n=${s##*/} && tmux -CC attach -t "=${n//./_}"'
+      attach='sesh connect -s "$s" && n=${s##*/} && tmux set -gw aggressive-resize off && tmux -u -CC attach -t "=${n//./_}"'
     ssh -t "$1" "s=\$(sesh list | fzf) && $attach"
     return
   fi
