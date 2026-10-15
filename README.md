@@ -104,6 +104,22 @@ mkdir -p ~/.config/wezterm
 ln -s ~/dotfiles/wezterm/wezterm.lua ~/.config/wezterm/wezterm.lua
 ```
 
+## Nano Configuration
+
+Line numbers and syntax highlighting for nano.
+
+### Features
+
+- Line numbers in the left margin (Alt+N toggles them)
+- Syntax highlighting from the definitions nano ships in `/usr/share/nano/` (the Arch path; other systems may install them elsewhere)
+
+### Installation
+
+```bash
+mkdir -p ~/.config/nano
+ln -s ~/dotfiles/nano/nanorc ~/.config/nano/nanorc
+```
+
 ## Syncthing Configuration
 
 Multi-language development ignore patterns optimized for performance.

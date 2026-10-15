@@ -1,0 +1,5 @@
+# Show line numbers in the left margin.
+set linenumbers
+
+# Syntax highlighting for the languages nano ships with.
+include "/usr/share/nano/*.nanorc"
