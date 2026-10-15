@@ -97,6 +97,19 @@ The user may explicitly permit any of these per-task ("use em dashes here"). The
 
 ---
 
+## Final Prose
+
+Before delivering a final deliverable, run the
+writing-with-agents:human-voice command on it in embedded mode and deliver
+its output. Final deliverables are finished content intended to be read
+by humans, such as READMEs, documentation pages, articles, release notes,
+and PR descriptions.
+
+Does not apply to commit messages, code comments, changelog entries, code,
+command output, drafts in progress, or conversational replies.
+
+---
+
 ## Interaction Guardrails
 
 - **One question at a time** - Prevents cognitive overload
