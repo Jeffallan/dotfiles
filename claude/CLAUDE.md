@@ -100,10 +100,14 @@ The user may explicitly permit any of these per-task ("use em dashes here"). The
 ## Final Prose
 
 Before delivering a final deliverable, run the
-writing-with-agents:human-voice command on it in embedded mode and deliver
-its output. Final deliverables are finished content intended to be read
-by humans, such as READMEs, documentation pages, articles, release notes,
-and PR descriptions.
+[writing-with-agents:human-voice](https://raw.githubusercontent.com/Jeffallan/writing-with-agents/main/plugin/commands/utilities/human-voice/COMMAND.md)
+command on it in embedded mode and deliver its output. Final deliverables
+are finished content intended to be read by humans, such as READMEs,
+documentation pages, articles, release notes, and PR descriptions.
+
+If the command is not installed, fetch the linked command file and the
+[human-voice catalog](https://raw.githubusercontent.com/Jeffallan/writing-with-agents/main/plugin/skills/judge/references/human-voice.md)
+it loads, and follow them in embedded mode.
 
 Does not apply to commit messages, code comments, changelog entries, code,
 command output, drafts in progress, or conversational replies.
