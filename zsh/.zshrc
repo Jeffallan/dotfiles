@@ -157,5 +157,14 @@ ts() {
   s=$(sesh list | fzf) && sesh connect "$s"
 }
 
+# vnc-desktop: open TigerVNC to the desktop through an ssh tunnel
+# needs a desktop-vnc host in ~/.ssh/config that forwards local port 5900;
+# ssh holds the tunnel only while the viewer uses it, so it closes on quit
+vnc-desktop() {
+  local viewer=vncviewer
+  [[ $OSTYPE == darwin* ]] && viewer=/Applications/TigerVNC.app/Contents/MacOS/vncviewer
+  ssh -f desktop-vnc sleep 10 && "$viewer" localhost:5900
+}
+
 # zoxide: record visited folders; cd jumps by frecency (keep near end of file)
 eval "$(zoxide init zsh --cmd cd)"
