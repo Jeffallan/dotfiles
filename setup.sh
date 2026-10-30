@@ -97,6 +97,7 @@ FILES=(
     "$DOTFILES_DIR/claude/CLAUDE.md|$HOME/.claude/CLAUDE.md"
     "$DOTFILES_DIR/wezterm/wezterm.lua|$HOME/.config/wezterm/wezterm.lua"
     "$DOTFILES_DIR/nano/nanorc|$HOME/.config/nano/nanorc"
+    "$DOTFILES_DIR/tmux/tmux.conf|$HOME/.config/tmux/tmux.conf"
 )
 
 # Process each file
