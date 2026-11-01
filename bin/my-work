@@ -226,10 +226,12 @@ search_all() {
 COMMIT_LINES=""; PR_LINES=""; ISSUE_LINES=""
 COMMITS_OK=0; PRS_OK=0; ISSUES_OK=0
 
-# Authored commits on any branch. Lines are "<repo>\t<sha>\t<subject>", newest
-# first; search can repeat a commit, so dedupe by SHA.
+# Authored commits on any branch, minus merge commits (pressing "Merge pull
+# request" makes one authored by the user; the PRs column already counts those).
+# Lines are "<repo>\t<sha>\t<subject>", newest first; search can repeat a
+# commit, so dedupe by SHA.
 if search_all commits commits --author="$USER_ARG" \
-    --author-date="${SINCE}..${UNTIL}" --sort author-date --limit 1000 \
+    --author-date="${SINCE}..${UNTIL}" --merge=false --sort author-date --limit 1000 \
     --json repository,sha,commit \
     --jq '.[] | [.repository.fullName, .sha, (.commit.message | split("\n")[0])] | @tsv'; then
     COMMIT_LINES=$(printf '%s\n' "$SEARCH_OUT" | awk -F'\t' 'NF && !seen[$2]++')
