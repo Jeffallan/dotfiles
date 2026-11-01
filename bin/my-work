@@ -188,62 +188,6 @@ UNTIL=$(_utc_iso "$UNTIL_EPOCH")
 SINCE_DATE=$(_local_ymd "$SINCE_EPOCH")
 UNTIL_DATE=$(_local_ymd "$UNTIL_EPOCH")
 
-# ---- fetch events, determine touched repos + per-type counts ----
-#
-# Fetch the whole feed unfiltered so we can tell whether it reaches back to SINCE.
-# Raw lines: "<created_at>\t<repo>\t<event_type>\t<payload.action or empty>"
-GH_ERR=$(mktemp)
-trap 'rm -f "$GH_ERR"' EXIT
-RAW_EVENTS=$(gh api "/users/${USER_ARG}/events" --paginate --jq \
-    '.[] | "\(.created_at)\t\(.repo.name)\t\(.type)\t\(.payload.action // "")"' \
-    2>"$GH_ERR") || die "fetching events failed: $(tr '\n' ' ' < "$GH_ERR")" 4
-
-# GitHub caps the feed (300 events, limited lookback); warn if it stops short of SINCE.
-OLDEST_EVENT=$(printf '%s\n' "$RAW_EVENTS" | awk -F'\t' 'NF && (o == "" || $1 < o) {o = $1} END {print o}')
-if [[ -n "$OLDEST_EVENT" && "$OLDEST_EVENT" > "$SINCE" ]]; then
-    warn "events feed only reaches back to ${OLDEST_EVENT} (GitHub caps it at 300 events and a limited lookback); repos touched only before then are missing"
-fi
-
-# Output lines: "<repo>\t<event_type>\t<payload.action or empty>"
-EVENTS=$(printf '%s\n' "$RAW_EVENTS" | awk -F'\t' -v s="$SINCE" -v u="$UNTIL" \
-    'NF && $1 >= s && $1 <= u {print $2 "\t" $3 "\t" $4}')
-
-# Collect unique repos (preserve order of first appearance).
-REPOS=()
-if [[ -n "$EVENTS" ]]; then
-    while IFS=$'\t' read -r repo _type; do
-        [[ -z "$repo" ]] && continue
-        seen=0
-        if [[ ${#REPOS[@]} -gt 0 ]]; then
-            for r in "${REPOS[@]}"; do
-                [[ "$r" == "$repo" ]] && seen=1 && break
-            done
-        fi
-        [[ $seen -eq 0 ]] && REPOS+=("$repo")
-    done <<< "$EVENTS"
-fi
-
-# ---- header ----
-printf 'Your %s (%s → %s) as %s\n\n' "$LABEL" "$SINCE_DATE" "$UNTIL_DATE" "$USER_ARG"
-
-if [[ ${#REPOS[@]} -eq 0 ]]; then
-    echo "No activity found in the events feed for this window."
-    [[ $WARNINGS -eq 1 ]] && exit 4
-    exit 0
-fi
-
-# count_events_for <repo> <type>
-count_events_for() {
-    local repo="$1" typ="$2"
-    printf '%s\n' "$EVENTS" | awk -F'\t' -v r="$repo" -v t="$typ" '$1==r && $2==t' | wc -l | tr -d ' '
-}
-
-# count_events_for_action <repo> <type> <action>
-count_events_for_action() {
-    local repo="$1" typ="$2" action="$3"
-    printf '%s\n' "$EVENTS" | awk -F'\t' -v r="$repo" -v t="$typ" -v a="$action" '$1==r && $2==t && $3==a' | wc -l | tr -d ' '
-}
-
 # gh_search <args...> — run `gh search <args...>` into SEARCH_OUT. If it fails
 # because the search quota (~30/min) is used up, wait for the reset and retry
 # once. Returns non-zero if the search still fails.
@@ -261,56 +205,118 @@ gh_search() {
     SEARCH_OUT=$(gh search "$@" 2>/dev/null)
 }
 
+# search_all <what> <gh search args...> — one account-wide search into SEARCH_OUT.
+# Warns and returns non-zero if it fails; warns if it hits the 1000-result cap.
+search_all() {
+    local what="$1"
+    shift
+    if ! gh_search "$@"; then
+        warn "could not search ${what}"
+        return 1
+    fi
+    if (( $(printf '%s' "$SEARCH_OUT" | awk 'END {print NR}') >= 1000 )); then
+        warn "${what} search hit GitHub's 1000-result cap; counts are incomplete"
+    fi
+}
+
+# ---- account-wide searches ----
+# Three searches over the whole account find every repo with activity in the
+# window. GitHub's events feed isn't used: it keeps only ~300 events, so busy
+# weeks lost their earliest repos. A failed search leaves its column as "?".
+COMMIT_LINES=""; PR_LINES=""; ISSUE_LINES=""
+COMMITS_OK=0; PRS_OK=0; ISSUES_OK=0
+
+# Authored commits on any branch. Lines are "<repo>\t<sha>\t<subject>", newest
+# first; search can repeat a commit, so dedupe by SHA.
+if search_all commits commits --author="$USER_ARG" \
+    --author-date="${SINCE}..${UNTIL}" --sort author-date --limit 1000 \
+    --json repository,sha,commit \
+    --jq '.[] | [.repository.fullName, .sha, (.commit.message | split("\n")[0])] | @tsv'; then
+    COMMIT_LINES=$(printf '%s\n' "$SEARCH_OUT" | awk -F'\t' 'NF && !seen[$2]++')
+    COMMITS_OK=1
+fi
+
+# PRs the user authored that were merged inside the window. One repo per line.
+if search_all "merged PRs" prs --author="$USER_ARG" \
+    --merged-at="${SINCE}..${UNTIL}" --limit 1000 \
+    --json repository --jq '.[].repository.nameWithOwner'; then
+    PR_LINES="$SEARCH_OUT"
+    PRS_OK=1
+fi
+
+# Issues the user opened inside the window (PRs excluded). One repo per line.
+if search_all "opened issues" issues --author="$USER_ARG" \
+    --created="${SINCE}..${UNTIL}" --limit 1000 \
+    --json repository --jq '.[].repository.nameWithOwner'; then
+    ISSUE_LINES="$SEARCH_OUT"
+    ISSUES_OK=1
+fi
+
+# Unique repos in order of first appearance: commits, then PRs, then issues.
+REPOS=()
+while IFS= read -r repo; do
+    REPOS+=("$repo")
+done < <({ printf '%s\n' "$COMMIT_LINES" | cut -f1; printf '%s\n' "$PR_LINES" "$ISSUE_LINES"; } \
+    | awk 'NF && !seen[$0]++')
+
+# ---- header ----
+printf 'Your %s (%s → %s) as %s\n\n' "$LABEL" "$SINCE_DATE" "$UNTIL_DATE" "$USER_ARG"
+
+if [[ ${#REPOS[@]} -eq 0 ]]; then
+    echo "No commits, merged PRs or opened issues found for this window."
+    [[ $WARNINGS -eq 1 ]] && exit 4
+    exit 0
+fi
+
+# count_lines <lines> <repo> — number of lines whose first field is <repo>.
+count_lines() {
+    printf '%s\n' "$1" | awk -F'\t' -v r="$2" '$1 == r {n++} END {print n+0}'
+}
+
 # ---- per-repo counts ----
 # A count that can't be fetched shows as "?" and is left out of the totals.
 OWNERS=(); NAMES=(); COMMITS=(); PRS=(); ISSUES=(); RELEASES=(); SUBJECTS=()
 TOTAL_COMMITS=0; TOTAL_PRS=0; TOTAL_ISSUES=0; TOTAL_RELEASES=0
 
 for repo in "${REPOS[@]}"; do
-    # Authored commits on any branch in the window, via commit search. Lines are
-    # "<sha>\t<subject>", newest first; search can repeat a commit, so dedupe by SHA.
-    # The first five subjects double as the --verbose list.
-    commits="?"; subjects=""
-    if gh_search commits --author="$USER_ARG" --repo="$repo" \
-        --author-date="${SINCE}..${UNTIL}" --sort author-date --limit 1000 \
-        --json sha,commit --jq '.[] | [.sha, (.commit.message | split("\n")[0])] | @tsv'; then
-        found=$(printf '%s\n' "$SEARCH_OUT" | awk -F'\t' 'NF && !seen[$1]++')
-        commits=$(printf '%s' "$found" | awk 'END {print NR}')
+    commits="?"; prs_merged="?"; issues="?"; releases="?"; subjects=""
+    if [[ $COMMITS_OK -eq 1 ]]; then
+        commits=$(count_lines "$COMMIT_LINES" "$repo")
+        TOTAL_COMMITS=$((TOTAL_COMMITS + commits))
         if [[ $VERBOSE -eq 1 && "$commits" -gt 0 ]]; then
-            subjects=$(printf '%s\n' "$found" | awk -F'\t' 'NR <= 5 {print "      - " $2}')
+            subjects=$(printf '%s\n' "$COMMIT_LINES" | \
+                awk -F'\t' -v r="$repo" '$1 == r && n++ < 5 {print "      - " $3}')
         fi
-    else
-        warn "$repo: could not count commits"
+    fi
+    if [[ $PRS_OK -eq 1 ]]; then
+        prs_merged=$(count_lines "$PR_LINES" "$repo")
+        TOTAL_PRS=$((TOTAL_PRS + prs_merged))
+    fi
+    if [[ $ISSUES_OK -eq 1 ]]; then
+        issues=$(count_lines "$ISSUE_LINES" "$repo")
+        TOTAL_ISSUES=$((TOTAL_ISSUES + issues))
     fi
 
-    # PRs the user authored in the repo that were merged inside the window.
-    prs_merged="?"
-    if gh_search prs --author="$USER_ARG" --repo="$repo" \
-        --merged-at="${SINCE}..${UNTIL}" --limit 1000 \
-        --json number --jq 'length'; then
-        prs_merged="${SEARCH_OUT:-0}"
+    # Releases the user published in the repo inside the window (drafts have no
+    # published_at and are skipped).
+    if release_ids=$(gh api "repos/${repo}/releases" --paginate --jq \
+        ".[] | select(.author.login == \"${USER_ARG}\" and .published_at != null and .published_at >= \"${SINCE}\" and .published_at <= \"${UNTIL}\") | .id" \
+        2>/dev/null); then
+        releases=$(printf '%s' "$release_ids" | awk 'END {print NR}')
+        TOTAL_RELEASES=$((TOTAL_RELEASES + releases))
     else
-        warn "$repo: could not count merged PRs"
+        warn "$repo: could not count releases"
     fi
-
-    # Issues opened by the user in the repo+window (from events feed).
-    issues=$(count_events_for_action "$repo" IssuesEvent opened)
-
-    # Releases cut by the user in the repo+window (from events feed).
-    releases=$(count_events_for "$repo" ReleaseEvent)
 
     OWNERS+=("${repo%%/*}"); NAMES+=("${repo#*/}")
     COMMITS+=("$commits"); PRS+=("$prs_merged"); ISSUES+=("$issues"); RELEASES+=("$releases")
     SUBJECTS+=("$subjects")
-    if [[ "$commits" != "?" ]]; then
-        TOTAL_COMMITS=$((TOTAL_COMMITS + commits))
-    fi
-    if [[ "$prs_merged" != "?" ]]; then
-        TOTAL_PRS=$((TOTAL_PRS + prs_merged))
-    fi
-    TOTAL_ISSUES=$((TOTAL_ISSUES + issues))
-    TOTAL_RELEASES=$((TOTAL_RELEASES + releases))
 done
+
+# A column whose search failed has no meaningful total.
+[[ $COMMITS_OK -eq 1 ]] || TOTAL_COMMITS="?"
+[[ $PRS_OK -eq 1 ]] || TOTAL_PRS="?"
+[[ $ISSUES_OK -eq 1 ]] || TOTAL_ISSUES="?"
 
 # ---- table ----
 if [[ ${#REPOS[@]} -eq 1 ]]; then
