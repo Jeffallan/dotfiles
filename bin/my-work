@@ -16,7 +16,7 @@
 #   --verbose       Include up to 5 commit subjects per repo.
 #   -h, --help      Show this message.
 #
-# Exits: 0 ok, 1 misuse, 2 gh missing, 3 gh not authenticated.
+# Exits: 0 ok, 1 misuse, 2 gh missing, 3 gh not authenticated, 4 GitHub API error.
 
 set -euo pipefail
 
@@ -31,6 +31,12 @@ usage() {
 die() {
     printf '%s: %s\n' "$PROG" "$1" >&2
     exit "${2:-1}"
+}
+
+WARNINGS=0
+warn() {
+    printf '%s: warning: %s\n' "$PROG" "$1" >&2
+    WARNINGS=1
 }
 
 # Format a UTC ISO-8601 timestamp from a date arithmetic spec.
@@ -204,10 +210,23 @@ UNTIL_DATE="${UNTIL%%T*}"
 
 # ---- fetch events, determine touched repos + per-type counts ----
 #
+# Fetch the whole feed unfiltered so we can tell whether it reaches back to SINCE.
+# Raw lines: "<created_at>\t<repo>\t<event_type>\t<payload.action or empty>"
+GH_ERR=$(mktemp)
+trap 'rm -f "$GH_ERR"' EXIT
+RAW_EVENTS=$(gh api "/users/${USER_ARG}/events" --paginate --jq \
+    '.[] | "\(.created_at)\t\(.repo.name)\t\(.type)\t\(.payload.action // "")"' \
+    2>"$GH_ERR") || die "fetching events failed: $(tr '\n' ' ' < "$GH_ERR")" 4
+
+# GitHub caps the feed (300 events, limited lookback); warn if it stops short of SINCE.
+OLDEST_EVENT=$(printf '%s\n' "$RAW_EVENTS" | awk -F'\t' 'NF && (o == "" || $1 < o) {o = $1} END {print o}')
+if [[ -n "$OLDEST_EVENT" && "$OLDEST_EVENT" > "$SINCE" ]]; then
+    warn "events feed only reaches back to ${OLDEST_EVENT} (GitHub caps it at 300 events and a limited lookback); repos touched only before then are missing"
+fi
+
 # Output lines: "<repo>\t<event_type>\t<payload.action or empty>"
-EVENTS=$(gh api "/users/${USER_ARG}/events" --paginate --jq \
-    ".[] | select(.created_at >= \"${SINCE}\" and .created_at <= \"${UNTIL}\") | \"\(.repo.name)\t\(.type)\t\(.payload.action // \"\")\"" \
-    2>/dev/null || true)
+EVENTS=$(printf '%s\n' "$RAW_EVENTS" | awk -F'\t' -v s="$SINCE" -v u="$UNTIL" \
+    'NF && $1 >= s && $1 <= u {print $2 "\t" $3 "\t" $4}')
 
 # Collect unique repos (preserve order of first appearance).
 REPOS=()
@@ -228,7 +247,8 @@ fi
 printf 'Your %s (%s → %s) as %s\n\n' "$LABEL" "$SINCE_DATE" "$UNTIL_DATE" "$USER_ARG"
 
 if [[ ${#REPOS[@]} -eq 0 ]]; then
-    echo "No public activity in this window."
+    echo "No activity found in the events feed for this window."
+    [[ $WARNINGS -eq 1 ]] && exit 4
     exit 0
 fi
 
@@ -313,3 +333,7 @@ done
 RULE_WIDTH=$(( W_OWNER + W_NAME + W_COMMITS + W_PRS + W_ISSUES + W_RELEASES + 10 ))
 printf '  %s\n' "$(printf '%*s' "$RULE_WIDTH" '' | tr ' ' '-')"
 print_row Total "$REPO_COUNT" "$TOTAL_COMMITS" "$TOTAL_PRS" "$TOTAL_ISSUES" "$TOTAL_RELEASES"
+
+if [[ $WARNINGS -eq 1 ]]; then
+    exit 4
+fi
