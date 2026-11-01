@@ -232,8 +232,6 @@ if [[ ${#REPOS[@]} -eq 0 ]]; then
     exit 0
 fi
 
-TOTAL_COMMITS=0
-
 # count_events_for <repo> <type>
 count_events_for() {
     local repo="$1" typ="$2"
@@ -246,61 +244,72 @@ count_events_for_action() {
     printf '%s\n' "$EVENTS" | awk -F'\t' -v r="$repo" -v t="$typ" -v a="$action" '$1==r && $2==t && $3==a' | wc -l | tr -d ' '
 }
 
+# ---- per-repo counts ----
+OWNERS=(); NAMES=(); COMMITS=(); PRS=(); ISSUES=(); RELEASES=(); SUBJECTS=()
+TOTAL_COMMITS=0; TOTAL_PRS=0; TOTAL_ISSUES=0; TOTAL_RELEASES=0
+
 for repo in "${REPOS[@]}"; do
     # Authored commits in window (counts all commits where user is GitHub author).
+    # A repo that errors (deleted, no access, empty) counts as 0 instead of aborting.
     commits=$(gh api "repos/${repo}/commits?author=${USER_ARG}&since=${SINCE}&until=${UNTIL}" \
-        --paginate --jq 'length' 2>/dev/null | awk '{s+=$1} END {print s+0}')
+        --paginate --jq 'length' 2>/dev/null | awk '{s+=$1} END {print s+0}') || true
 
-    # Merged PRs the user authored in the repo+window.
+    # PRs the user authored in the repo that were merged inside the window.
     prs_merged=$(gh search prs --author="$USER_ARG" --repo="$repo" \
-        --created="${SINCE_DATE}..${UNTIL_DATE}" --merged \
+        --merged-at="${SINCE_DATE}..${UNTIL_DATE}" --limit 1000 \
         --json number --jq 'length' 2>/dev/null || echo 0)
-
-    # Releases cut by the user in the repo+window (from events feed).
-    releases=$(count_events_for "$repo" ReleaseEvent)
 
     # Issues opened by the user in the repo+window (from events feed).
     issues=$(count_events_for_action "$repo" IssuesEvent opened)
 
-    # Assemble the summary line (join parts with " · ").
-    summary=""
-    append_part() {
-        [[ -n "$summary" ]] && summary+=" · "
-        summary+="$1"
-    }
-    append_part "${commits} commits"
-    [[ "$prs_merged" -gt 0 ]] && append_part "${prs_merged} PRs merged"
-    if [[ "$releases" -gt 0 ]]; then
-        if [[ "$releases" -eq 1 ]]; then
-            append_part "${releases} release"
-        else
-            append_part "${releases} releases"
-        fi
-    fi
-    if [[ "$issues" -gt 0 ]]; then
-        if [[ "$issues" -eq 1 ]]; then
-            append_part "${issues} issue opened"
-        else
-            append_part "${issues} issues opened"
-        fi
-    fi
+    # Releases cut by the user in the repo+window (from events feed).
+    releases=$(count_events_for "$repo" ReleaseEvent)
 
-    if [[ "$commits" -eq 0 && "$prs_merged" -eq 0 && "$releases" -eq 0 && "$issues" -eq 0 ]]; then
-        printf '  %-42s (events only — no authored commits/PRs/releases/issues)\n' "$repo"
-    else
-        printf '  %-42s %s\n' "$repo" "$summary"
-    fi
-
-    TOTAL_COMMITS=$((TOTAL_COMMITS + commits))
-
+    subjects=""
     if [[ $VERBOSE -eq 1 && "$commits" -gt 0 ]]; then
-        gh api "repos/${repo}/commits?author=${USER_ARG}&since=${SINCE}&until=${UNTIL}" \
-            --jq '.[] | "      - " + (.commit.message | split("\n")[0])' 2>/dev/null | head -n 5
+        subjects=$(gh api "repos/${repo}/commits?author=${USER_ARG}&since=${SINCE}&until=${UNTIL}" \
+            --jq '.[] | "      - " + (.commit.message | split("\n")[0])' 2>/dev/null | head -n 5) || true
     fi
+
+    OWNERS+=("${repo%%/*}"); NAMES+=("${repo#*/}")
+    COMMITS+=("$commits"); PRS+=("$prs_merged"); ISSUES+=("$issues"); RELEASES+=("$releases")
+    SUBJECTS+=("$subjects")
+    TOTAL_COMMITS=$((TOTAL_COMMITS + commits))
+    TOTAL_PRS=$((TOTAL_PRS + prs_merged))
+    TOTAL_ISSUES=$((TOTAL_ISSUES + issues))
+    TOTAL_RELEASES=$((TOTAL_RELEASES + releases))
 done
 
+# ---- table ----
 if [[ ${#REPOS[@]} -eq 1 ]]; then
-    printf '\nTotal: %d commits across 1 repo.\n' "$TOTAL_COMMITS"
+    REPO_COUNT="1 repo"
 else
-    printf '\nTotal: %d commits across %d repos.\n' "$TOTAL_COMMITS" "${#REPOS[@]}"
+    REPO_COUNT="${#REPOS[@]} repos"
 fi
+
+# Column widths: widest of header, total row, and every repo row.
+W_OWNER=5; W_NAME=${#REPO_COUNT}
+(( W_NAME < 4 )) && W_NAME=4
+for i in "${!OWNERS[@]}"; do
+    (( ${#OWNERS[i]} > W_OWNER )) && W_OWNER=${#OWNERS[i]}
+    (( ${#NAMES[i]} > W_NAME )) && W_NAME=${#NAMES[i]}
+done
+W_COMMITS=$(( ${#TOTAL_COMMITS} > 7 ? ${#TOTAL_COMMITS} : 7 ))
+W_PRS=$(( ${#TOTAL_PRS} > 3 ? ${#TOTAL_PRS} : 3 ))
+W_ISSUES=$(( ${#TOTAL_ISSUES} > 6 ? ${#TOTAL_ISSUES} : 6 ))
+W_RELEASES=$(( ${#TOTAL_RELEASES} > 8 ? ${#TOTAL_RELEASES} : 8 ))
+
+print_row() {
+    printf '  %-*s  %-*s  %*s  %*s  %*s  %*s\n' \
+        "$W_OWNER" "$1" "$W_NAME" "$2" "$W_COMMITS" "$3" "$W_PRS" "$4" "$W_ISSUES" "$5" \
+        "$W_RELEASES" "$6"
+}
+
+print_row OWNER REPO COMMITS PRs ISSUES RELEASES
+for i in "${!OWNERS[@]}"; do
+    print_row "${OWNERS[i]}" "${NAMES[i]}" "${COMMITS[i]}" "${PRS[i]}" "${ISSUES[i]}" "${RELEASES[i]}"
+    [[ -n "${SUBJECTS[i]}" ]] && printf '%s\n' "${SUBJECTS[i]}"
+done
+RULE_WIDTH=$(( W_OWNER + W_NAME + W_COMMITS + W_PRS + W_ISSUES + W_RELEASES + 10 ))
+printf '  %s\n' "$(printf '%*s' "$RULE_WIDTH" '' | tr ' ' '-')"
+print_row Total "$REPO_COUNT" "$TOTAL_COMMITS" "$TOTAL_PRS" "$TOTAL_ISSUES" "$TOTAL_RELEASES"
