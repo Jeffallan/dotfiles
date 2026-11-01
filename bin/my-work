@@ -16,7 +16,7 @@
 #   --verbose       Include up to 5 commit subjects per repo.
 #   -h, --help      Show this message.
 #
-# Exits: 0 ok, 1 misuse, 2 gh missing, 3 gh not authenticated.
+# Exits: 0 ok, 1 misuse, 2 gh missing, 3 gh not authenticated, 4 GitHub API error.
 
 set -euo pipefail
 
@@ -31,6 +31,12 @@ usage() {
 die() {
     printf '%s: %s\n' "$PROG" "$1" >&2
     exit "${2:-1}"
+}
+
+WARNINGS=0
+warn() {
+    printf '%s: warning: %s\n' "$PROG" "$1" >&2
+    WARNINGS=1
 }
 
 # Format a UTC ISO-8601 timestamp from a date arithmetic spec.
@@ -244,20 +250,54 @@ count_events_for_action() {
     printf '%s\n' "$EVENTS" | awk -F'\t' -v r="$repo" -v t="$typ" -v a="$action" '$1==r && $2==t && $3==a' | wc -l | tr -d ' '
 }
 
+# gh_search <args...> — run `gh search <args...>` into SEARCH_OUT. If it fails
+# because the search quota (~30/min) is used up, wait for the reset and retry
+# once. Returns non-zero if the search still fails.
+gh_search() {
+    local quota remaining reset wait
+    SEARCH_OUT=$(gh search "$@" 2>/dev/null) && return 0
+    quota=$(gh api rate_limit --jq '.resources.search | "\(.remaining) \(.reset)"' 2>/dev/null) || return 1
+    remaining="${quota%% *}"; reset="${quota##* }"
+    [[ "$remaining" == 0 && "$reset" =~ ^[0-9]+$ ]] || return 1
+    wait=$(( reset - $(date +%s) + 1 ))
+    (( wait < 1 )) && wait=1
+    (( wait > 61 )) && wait=61
+    printf '%s: search rate limit reached, waiting %ss\n' "$PROG" "$wait" >&2
+    sleep "$wait"
+    SEARCH_OUT=$(gh search "$@" 2>/dev/null)
+}
+
 # ---- per-repo counts ----
+# A count that can't be fetched shows as "?" and is left out of the totals.
 OWNERS=(); NAMES=(); COMMITS=(); PRS=(); ISSUES=(); RELEASES=(); SUBJECTS=()
 TOTAL_COMMITS=0; TOTAL_PRS=0; TOTAL_ISSUES=0; TOTAL_RELEASES=0
 
 for repo in "${REPOS[@]}"; do
-    # Authored commits in window (counts all commits where user is GitHub author).
-    # A repo that errors (deleted, no access, empty) counts as 0 instead of aborting.
-    commits=$(gh api "repos/${repo}/commits?author=${USER_ARG}&since=${SINCE}&until=${UNTIL}" \
-        --paginate --jq 'length' 2>/dev/null | awk '{s+=$1} END {print s+0}') || true
+    # Authored commits on any branch in the window, via commit search. Lines are
+    # "<sha>\t<subject>", newest first; search can repeat a commit, so dedupe by SHA.
+    # The first five subjects double as the --verbose list.
+    commits="?"; subjects=""
+    if gh_search commits --author="$USER_ARG" --repo="$repo" \
+        --author-date="${SINCE}..${UNTIL}" --sort author-date --limit 1000 \
+        --json sha,commit --jq '.[] | [.sha, (.commit.message | split("\n")[0])] | @tsv'; then
+        found=$(printf '%s\n' "$SEARCH_OUT" | awk -F'\t' 'NF && !seen[$1]++')
+        commits=$(printf '%s' "$found" | awk 'END {print NR}')
+        if [[ $VERBOSE -eq 1 && "$commits" -gt 0 ]]; then
+            subjects=$(printf '%s\n' "$found" | awk -F'\t' 'NR <= 5 {print "      - " $2}')
+        fi
+    else
+        warn "$repo: could not count commits"
+    fi
 
     # PRs the user authored in the repo that were merged inside the window.
-    prs_merged=$(gh search prs --author="$USER_ARG" --repo="$repo" \
-        --merged-at="${SINCE_DATE}..${UNTIL_DATE}" --limit 1000 \
-        --json number --jq 'length' 2>/dev/null || echo 0)
+    prs_merged="?"
+    if gh_search prs --author="$USER_ARG" --repo="$repo" \
+        --merged-at="${SINCE}..${UNTIL}" --limit 1000 \
+        --json number --jq 'length'; then
+        prs_merged="${SEARCH_OUT:-0}"
+    else
+        warn "$repo: could not count merged PRs"
+    fi
 
     # Issues opened by the user in the repo+window (from events feed).
     issues=$(count_events_for_action "$repo" IssuesEvent opened)
@@ -265,17 +305,15 @@ for repo in "${REPOS[@]}"; do
     # Releases cut by the user in the repo+window (from events feed).
     releases=$(count_events_for "$repo" ReleaseEvent)
 
-    subjects=""
-    if [[ $VERBOSE -eq 1 && "$commits" -gt 0 ]]; then
-        subjects=$(gh api "repos/${repo}/commits?author=${USER_ARG}&since=${SINCE}&until=${UNTIL}" \
-            --jq '.[] | "      - " + (.commit.message | split("\n")[0])' 2>/dev/null | head -n 5) || true
-    fi
-
     OWNERS+=("${repo%%/*}"); NAMES+=("${repo#*/}")
     COMMITS+=("$commits"); PRS+=("$prs_merged"); ISSUES+=("$issues"); RELEASES+=("$releases")
     SUBJECTS+=("$subjects")
-    TOTAL_COMMITS=$((TOTAL_COMMITS + commits))
-    TOTAL_PRS=$((TOTAL_PRS + prs_merged))
+    if [[ "$commits" != "?" ]]; then
+        TOTAL_COMMITS=$((TOTAL_COMMITS + commits))
+    fi
+    if [[ "$prs_merged" != "?" ]]; then
+        TOTAL_PRS=$((TOTAL_PRS + prs_merged))
+    fi
     TOTAL_ISSUES=$((TOTAL_ISSUES + issues))
     TOTAL_RELEASES=$((TOTAL_RELEASES + releases))
 done
@@ -313,3 +351,7 @@ done
 RULE_WIDTH=$(( W_OWNER + W_NAME + W_COMMITS + W_PRS + W_ISSUES + W_RELEASES + 10 ))
 printf '  %s\n' "$(printf '%*s' "$RULE_WIDTH" '' | tr ' ' '-')"
 print_row Total "$REPO_COUNT" "$TOTAL_COMMITS" "$TOTAL_PRS" "$TOTAL_ISSUES" "$TOTAL_RELEASES"
+
+if [[ $WARNINGS -eq 1 ]]; then
+    exit 4
+fi
