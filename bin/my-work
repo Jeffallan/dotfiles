@@ -10,8 +10,8 @@
 #                     this-month             last-month
 #                     today
 #                     Nd / Nw / Nm  (e.g. 7d, 2w, 1m)
-#   --since DATE    ISO date (YYYY-MM-DD). Overrides --period start.
-#   --until DATE    ISO date (YYYY-MM-DD). Overrides --period end.
+#   --since DATE    Local date (YYYY-MM-DD). Overrides --period start.
+#   --until DATE    Local date (YYYY-MM-DD). Overrides --period end.
 #   --user USER     GitHub login. Default: `gh api user --jq .login`.
 #   --verbose       Include up to 5 commit subjects per repo.
 #   -h, --help      Show this message.
@@ -33,129 +33,105 @@ die() {
     exit "${2:-1}"
 }
 
-# Format a UTC ISO-8601 timestamp from a date arithmetic spec.
-# Accepts one of:
-#   now                       — current time
-#   today                     — today 00:00:00Z
-#   monday-of-week            — Monday 00:00:00Z of current ISO week
-#   monday-of-last-week       — Monday 00:00:00Z of prior ISO week
-#   sunday-of-last-week-end   — Sunday 23:59:59Z of prior ISO week
-#   first-of-month            — 1st of current month 00:00:00Z
-#   first-of-last-month       — 1st of prior month 00:00:00Z
-#   last-of-last-month-end    — last day of prior month 23:59:59Z
-#   offset:Nd | offset:Nw | offset:Nm   — now minus N days/weeks/months
-#   date-start:YYYY-MM-DD     — 00:00:00Z at given date
-#   date-end:YYYY-MM-DD       — 23:59:59Z at given date
-_iso() {
-    local spec="$1"
-    case "$spec" in
-        now)
-            if [[ $IS_DARWIN -eq 1 ]]; then
-                date -u +%Y-%m-%dT%H:%M:%SZ
-            else
-                date -u +%Y-%m-%dT%H:%M:%SZ
-            fi
-            ;;
-        today)
-            date -u +%Y-%m-%dT00:00:00Z
-            ;;
-        monday-of-week)
-            # ISO weekday: 1=Mon..7=Sun
-            local dow offset
-            dow=$(date -u +%u)
-            offset=$((dow - 1))
-            if [[ $IS_DARWIN -eq 1 ]]; then
-                date -u -v-"${offset}"d +%Y-%m-%dT00:00:00Z
-            else
-                date -u -d "${offset} days ago" +%Y-%m-%dT00:00:00Z
-            fi
-            ;;
-        monday-of-last-week)
-            local dow offset
-            dow=$(date -u +%u)
-            offset=$((dow - 1 + 7))
-            if [[ $IS_DARWIN -eq 1 ]]; then
-                date -u -v-"${offset}"d +%Y-%m-%dT00:00:00Z
-            else
-                date -u -d "${offset} days ago" +%Y-%m-%dT00:00:00Z
-            fi
-            ;;
-        sunday-of-last-week-end)
-            local dow offset
-            dow=$(date -u +%u)
-            offset=$((dow - 1 + 1))
-            if [[ $IS_DARWIN -eq 1 ]]; then
-                date -u -v-"${offset}"d +%Y-%m-%dT23:59:59Z
-            else
-                date -u -d "${offset} days ago" +%Y-%m-%dT23:59:59Z
-            fi
-            ;;
-        first-of-month)
-            date -u +%Y-%m-01T00:00:00Z
-            ;;
-        first-of-last-month)
-            if [[ $IS_DARWIN -eq 1 ]]; then
-                date -u -v1d -v-1m +%Y-%m-01T00:00:00Z
-            else
-                date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m-01T00:00:00Z
-            fi
-            ;;
-        last-of-last-month-end)
-            if [[ $IS_DARWIN -eq 1 ]]; then
-                date -u -v1d -v-1d +%Y-%m-%dT23:59:59Z
-            else
-                date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m-%dT23:59:59Z
-            fi
-            ;;
-        offset:*)
-            local rhs unit n flag
-            rhs="${spec#offset:}"
-            unit="${rhs: -1}"
-            n="${rhs%?}"
-            [[ "$n" =~ ^[0-9]+$ ]] || die "invalid offset: $rhs" 1
-            case "$unit" in
-                d) flag="d"; word="days" ;;
-                w) flag="w"; word="weeks" ;;
-                m) flag="m"; word="months" ;;
-                *) die "invalid offset unit '$unit' in '$rhs' (use d/w/m)" 1 ;;
-            esac
-            if [[ $IS_DARWIN -eq 1 ]]; then
-                date -u -v-"${n}${flag}" +%Y-%m-%dT%H:%M:%SZ
-            else
-                date -u -d "${n} ${word} ago" +%Y-%m-%dT%H:%M:%SZ
-            fi
-            ;;
-        date-start:*)
-            local d="${spec#date-start:}"
-            [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "invalid date: $d (want YYYY-MM-DD)" 1
-            printf '%sT00:00:00Z\n' "$d"
-            ;;
-        date-end:*)
-            local d="${spec#date-end:}"
-            [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "invalid date: $d (want YYYY-MM-DD)" 1
-            printf '%sT23:59:59Z\n' "$d"
-            ;;
-        *)
-            die "internal: unknown _iso spec '$spec'" 1
-            ;;
-    esac
+# Window boundaries are local calendar days; the API wants UTC. Everything is
+# carried as epoch seconds and only formatted at the end.
+
+# _epoch_of_local DATE TIME — epoch of a local wall-clock time. Dies unless
+# DATE is a real YYYY-MM-DD calendar date.
+_epoch_of_local() {
+    local d="$1" t="$2" epoch back=""
+    [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "invalid date: $d (want YYYY-MM-DD)" 1
+    if [[ $IS_DARWIN -eq 1 ]]; then
+        epoch=$(date -j -f '%Y-%m-%d %H:%M:%S' "$d $t" +%s 2>/dev/null) || epoch=""
+    else
+        epoch=$(date -d "$d $t" +%s 2>/dev/null) || epoch=""
+    fi
+    # BSD date rolls 2026-02-30 over to March instead of failing; the
+    # round trip catches that on both platforms.
+    [[ -n "$epoch" ]] && back=$(_local_ymd "$epoch")
+    [[ "$back" == "$d" ]] || die "invalid date: $d (want YYYY-MM-DD)" 1
+    printf '%s\n' "$epoch"
 }
 
+# _local_ymd EPOCH — local calendar date (YYYY-MM-DD) of EPOCH.
+_local_ymd() {
+    if [[ $IS_DARWIN -eq 1 ]]; then
+        date -r "$1" +%Y-%m-%d
+    else
+        date -d "@$1" +%Y-%m-%d
+    fi
+}
+
+# _utc_iso EPOCH — UTC ISO-8601 timestamp of EPOCH.
+_utc_iso() {
+    if [[ $IS_DARWIN -eq 1 ]]; then
+        date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ
+    else
+        date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ
+    fi
+}
+
+# _days_ago N — local calendar date N days before today.
+_days_ago() {
+    if [[ $IS_DARWIN -eq 1 ]]; then
+        date -v-"$1"d +%Y-%m-%d
+    else
+        # Anchor at noon so a DST shift can't push the result across midnight.
+        date -d "$(date +%Y-%m-%d) 12:00 $1 days ago" +%Y-%m-%d
+    fi
+}
+
+# _offset_epoch Nd|Nw|Nm — epoch of now minus N days/weeks/months.
+_offset_epoch() {
+    local rhs="$1" unit n flag word
+    unit="${rhs: -1}"
+    n="${rhs%?}"
+    [[ "$n" =~ ^[0-9]+$ ]] || die "invalid offset: $rhs" 1
+    case "$unit" in
+        d) flag="d"; word="days" ;;
+        w) flag="w"; word="weeks" ;;
+        m) flag="m"; word="months" ;;
+        *) die "invalid offset unit '$unit' in '$rhs' (use d/w/m)" 1 ;;
+    esac
+    if [[ $IS_DARWIN -eq 1 ]]; then
+        date -v-"${n}${flag}" +%s
+    else
+        date -d "${n} ${word} ago" +%s
+    fi
+}
+
+# Sets SINCE_EPOCH and UNTIL_EPOCH. Named periods start and end at local
+# midnights, and the ISO weekday is the local one (1=Mon..7=Sun).
 resolve_period() {
-    local period="$1"
+    local period="$1" dow first lfirst llast
+    dow=$(date +%u)
+    first=$(date +%Y-%m-01)
     case "$period" in
         this-week)
-            SINCE=$(_iso monday-of-week); UNTIL=$(_iso now) ;;
+            SINCE_EPOCH=$(_epoch_of_local "$(_days_ago $((dow - 1)))" 00:00:00)
+            UNTIL_EPOCH=$(date +%s) ;;
         last-week)
-            SINCE=$(_iso monday-of-last-week); UNTIL=$(_iso sunday-of-last-week-end) ;;
+            SINCE_EPOCH=$(_epoch_of_local "$(_days_ago $((dow + 6)))" 00:00:00)
+            UNTIL_EPOCH=$(_epoch_of_local "$(_days_ago "$dow")" 23:59:59) ;;
         this-month)
-            SINCE=$(_iso first-of-month); UNTIL=$(_iso now) ;;
+            SINCE_EPOCH=$(_epoch_of_local "$first" 00:00:00)
+            UNTIL_EPOCH=$(date +%s) ;;
         last-month)
-            SINCE=$(_iso first-of-last-month); UNTIL=$(_iso last-of-last-month-end) ;;
+            if [[ $IS_DARWIN -eq 1 ]]; then
+                lfirst=$(date -v1d -v-1m +%Y-%m-01)
+                llast=$(date -v1d -v-1d +%Y-%m-%d)
+            else
+                lfirst=$(date -d "$first 12:00 1 month ago" +%Y-%m-01)
+                llast=$(date -d "$first 12:00 1 day ago" +%Y-%m-%d)
+            fi
+            SINCE_EPOCH=$(_epoch_of_local "$lfirst" 00:00:00)
+            UNTIL_EPOCH=$(_epoch_of_local "$llast" 23:59:59) ;;
         today)
-            SINCE=$(_iso today); UNTIL=$(_iso now) ;;
+            SINCE_EPOCH=$(_epoch_of_local "$(date +%Y-%m-%d)" 00:00:00)
+            UNTIL_EPOCH=$(date +%s) ;;
         *[dwm])
-            SINCE=$(_iso "offset:$period"); UNTIL=$(_iso now) ;;
+            SINCE_EPOCH=$(_offset_epoch "$period")
+            UNTIL_EPOCH=$(date +%s) ;;
         *)
             die "unknown --period '$period'" 1 ;;
     esac
@@ -191,16 +167,20 @@ fi
 resolve_period "$PERIOD"
 LABEL="$PERIOD"
 if [[ -n "$SINCE_OVERRIDE" ]]; then
-    SINCE=$(_iso "date-start:$SINCE_OVERRIDE")
+    SINCE_EPOCH=$(_epoch_of_local "$SINCE_OVERRIDE" 00:00:00)
     LABEL="custom range"
 fi
 if [[ -n "$UNTIL_OVERRIDE" ]]; then
-    UNTIL=$(_iso "date-end:$UNTIL_OVERRIDE")
+    UNTIL_EPOCH=$(_epoch_of_local "$UNTIL_OVERRIDE" 23:59:59)
     LABEL="custom range"
 fi
+(( SINCE_EPOCH <= UNTIL_EPOCH )) || \
+    die "window start $(_local_ymd "$SINCE_EPOCH") is after its end $(_local_ymd "$UNTIL_EPOCH")" 1
 
-SINCE_DATE="${SINCE%%T*}"
-UNTIL_DATE="${UNTIL%%T*}"
+SINCE=$(_utc_iso "$SINCE_EPOCH")
+UNTIL=$(_utc_iso "$UNTIL_EPOCH")
+SINCE_DATE=$(_local_ymd "$SINCE_EPOCH")
+UNTIL_DATE=$(_local_ymd "$UNTIL_EPOCH")
 
 # ---- fetch events, determine touched repos + per-type counts ----
 #
