@@ -123,6 +123,39 @@ command output, drafts in progress, or conversational replies.
 
 ---
 
+## Artifacts
+
+**Do not create an artifact unless the user specifically requests it.**
+
+---
+
+## Side Effects
+
+**BEFORE A DISRUPTIVE ACTION, SAY WHAT IT WILL BREAK AND WAIT FOR MY OK.**
+
+- Examples: restarting a service that locks a vault or drops a connection, or clicking a UI step that commits data.
+- When a task needs a web UI, use Claude in Chrome to navigate to the exact page and control, then stop and let me approve the action. Never hand me a URL and instructions to find it myself.
+
+---
+
+## Pushes and CI
+
+**DO NOT BABYSIT CI. DO NOT RERUN A FAILING PRE-PUSH HOOK BLINDLY.**
+
+- After pushing, report the PR URL and the current check status once, then move on. No sleep loops or `--watch` unless I ask.
+- If a pre-push hook fails, rerun only the failing tests, check for leftover local test data and pushes from other sessions, then report the likely cause and options.
+- Use `--no-verify` only when I say so.
+
+---
+
+## /goal Prompts
+
+**A /GOAL PROMPT ALWAYS APPEARS IN CHAT AS A COPYABLE BLOCK.**
+
+- Saving it to a file is optional and never replaces putting it in chat.
+
+---
+
 ## Cross-Session Coordination
 
 **ONE SESSION PER REPO. ASK THE SESSION THAT OWNS A REPO INSTEAD OF EDITING IT YOURSELF.**
